@@ -59,7 +59,7 @@ def eval_model(args):
     model_name = get_model_name_from_path(model_path)
     
     # 检查是否使用 actor
-    use_attention_actor = getattr(args, 'use_attention_actor', False)
+    use_actor = getattr(args, 'use_actor', False)
     actor_hidden_dim = getattr(args, 'actor_hidden_dim', 1024)
     actor_num_heads = getattr(args, 'actor_num_heads', 8)
     actor_num_layers = getattr(args, 'actor_num_layers', 1)
@@ -73,7 +73,7 @@ def eval_model(args):
         args.model_base, 
         model_name,
         device="cuda",
-        use_attention_actor=use_attention_actor,
+        use_actor=use_actor,
         actor_hidden_dim=actor_hidden_dim,
         actor_num_heads=actor_num_heads,
         actor_num_layers=actor_num_layers,
@@ -82,10 +82,10 @@ def eval_model(args):
         actor_tau=actor_tau,
     )
     
-    # 在推理模式下初始化 attention_actor（如果配置中启用了 actor 但实例未创建）
-    if use_attention_actor:
+    # 在推理模式下初始化 actor（如果配置中启用了 actor 但实例未创建）
+    if use_actor:
         mdl = model.get_model()
-        if hasattr(mdl, 'attention_actor') and mdl.attention_actor is None:
+        if hasattr(mdl, 'actor') and mdl.actor is None:
             from llava.model.dynamicvlm_actor import dynamicvlm_actor
             
             # 获取模型的 hidden_size 作为 text_dim 和 image_dim
@@ -93,7 +93,7 @@ def eval_model(args):
             image_dim = text_dim
             
             print(f"[INFO] Initializing dynamicvlm_actor for inference: hidden_dim={actor_hidden_dim}, num_heads={actor_num_heads}, num_layers={actor_num_layers}, top_k={actor_top_k}")
-            mdl.attention_actor = dynamicvlm_actor(
+            mdl.actor = dynamicvlm_actor(
                 text_dim=text_dim,
                 image_dim=image_dim,
                 hidden_dim=actor_hidden_dim,
@@ -103,15 +103,15 @@ def eval_model(args):
                 top_k=actor_top_k,
                 tau=actor_tau,
             )
-            mdl.attention_actor = mdl.attention_actor.to(device="cuda", dtype=torch.float16)
+            mdl.actor = mdl.actor.to(device="cuda", dtype=torch.float16)
     
     # 加载 actor 权重
-    if use_attention_actor and actor_ckpt and actor_ckpt != "None":
+    if use_actor and actor_ckpt and actor_ckpt != "None":
         actor_ckpt_path = os.path.expanduser(actor_ckpt)
         if os.path.exists(actor_ckpt_path):
             print(f"[INFO] Loading actor weights from: {actor_ckpt_path}")
             actor_state_dict = torch.load(actor_ckpt_path, map_location='cpu')
-            model.get_model().attention_actor.load_state_dict(actor_state_dict, strict=False)
+            model.get_model().actor.load_state_dict(actor_state_dict, strict=False)
             print(f"[INFO] Actor weights loaded successfully")
         else:
             print(f"[WARNING] Actor checkpoint not found: {actor_ckpt_path}")
@@ -194,7 +194,7 @@ def eval_model(args):
             outputs = tokenizer.batch_decode(output_ids, skip_special_tokens=True)[0].strip()
             
             # 收集 keep_mask 数据用于可视化
-            if has_visualization and use_attention_actor:
+            if has_visualization and use_actor:
                 mdl = model.get_model()
                 keep_mask_list = getattr(mdl, '_last_keep_mask_list', [])
                 
@@ -231,7 +231,7 @@ def eval_model(args):
     ans_file.close()
     
     # 保存最终统计信息
-    if has_visualization and use_attention_actor and len(model.get_model()._pruning_history_keep_ratio) > 0:
+    if has_visualization and use_actor and len(model.get_model()._pruning_history_keep_ratio) > 0:
         _save_eval_stats(visualization_output_dir, model.get_model(), len(questions))
 
 
@@ -305,7 +305,7 @@ if __name__ == "__main__":
     parser.add_argument("--lang", type=str, default="en")
     
     # Actor 相关参数
-    parser.add_argument("--use_attention_actor", action="store_true", help="Use attention actor for pruning")
+    parser.add_argument("--use_actor", action="store_true", help="Use attention actor for pruning")
     parser.add_argument("--actor_hidden_dim", type=int, default=1024, help="Actor hidden dimension")
     parser.add_argument("--actor_num_heads", type=int, default=8, help="Actor number of attention heads")
     parser.add_argument("--actor_num_layers", type=int, default=1, help="Actor number of layers")

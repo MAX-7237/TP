@@ -41,52 +41,7 @@ ImageFile.LOAD_TRUNCATED_IMAGES = True
 
 
 local_rank = None
-from llava.train.callbacks_loss_plot import LossPlotCallback
-
-#官方实现maybe_zero3
-def maybe_zero_3(param, ignore_status=False, name=None):
-    from deepspeed import zero
-    from deepspeed.runtime.zero.partition_parameters import ZeroParamStatus
-    if hasattr(param, "ds_id"):
-        if param.ds_status == ZeroParamStatus.NOT_AVAILABLE:
-            if not ignore_status:
-                logging.warning(f"{name}: param.ds_status != ZeroParamStatus.NOT_AVAILABLE: {param.ds_status}")
-        with zero.GatheredParameters([param]):
-            param = param.data.detach().cpu().clone()
-    else:
-        param = param.detach().cpu().clone()
-    return param
-
-#----------------------------------------------------------------------------------------------------------
-def freeze_all_but_actor(model):
-    # 先冻结全部参数
-    model.requires_grad_(False)
-    # model是LLaVAllamaForCausalLM
-    # model.model是LlavaLlamaModel,他继承来自llamamodel
-    #llamamodel中定义了actor,所以model.model.actor就是actor
-    actor = model.model.actor
-    # 只解冻 actor
-    for p in actor.parameters():
-        p.requires_grad = True
-
-    # （可选）打印一下确认
-    n_total = sum(p.numel() for p in model.parameters())
-    n_train = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    rank0_print(f"[Actor-only] trainable params: {n_train}/{n_total} ({100*n_train/n_total:.4f}%)")
-    return actor
-
-def get_actor_state_maybe_zero_3(model):
-    named_params = model.model.actor.named_parameters()
-    # 复用已有的 maybe_zero_3
-    state = {k: maybe_zero_3(v, ignore_status=True, name=k).cpu() for k, v in named_params}
-    return state
-
-def save_actor_only(model, output_dir):
-    os.makedirs(output_dir, exist_ok=True)
-    actor_state = get_actor_state_maybe_zero_3(model)
-    # 推荐文件名
-    torch.save(actor_state, os.path.join(output_dir, "actor.bin"))
-#----------------------------------------------------------------------------------------------------------
+from llava.train.callbacks_viz_ckpt import (LossPlotCallback, SaveActorCallback,maybe_zero_3, freeze_all_but_actor, get_actor_state_maybe_zero_3, save_actor_only)
 
 
 def rank0_print(*args):
@@ -1012,6 +967,10 @@ def train(attn_implementation=None):
     PLOT_EVERY = int(os.environ.get("PLOT_EVERY_STEPS", "50"))
     VIS_DIR = os.environ.get("VIS_DIR", training_args.output_dir)
     trainer.add_callback(LossPlotCallback(out_dir=VIS_DIR, plot_every_steps=PLOT_EVERY))
+    # 定期保存 actor 权重
+    SAVE_ACTOR_EVERY = int(os.environ.get("SAVE_ACTOR_EVERY_STEPS", "200"))
+    CKPT_DIR=os.environ.get("CKPT_DIR",training_args.output_dir)
+    trainer.add_callback(SaveActorCallback(out_dir=CKPT_DIR,save_every_steps=SAVE_ACTOR_EVERY))
     #--------------------------------------------------------------------------------
     
     if list(pathlib.Path(training_args.output_dir).glob("checkpoint-*")):

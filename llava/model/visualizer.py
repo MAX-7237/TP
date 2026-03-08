@@ -949,7 +949,7 @@ class ActorVisualizer:
             print(f"[ActorVisualizer] Error in plot_rds_over_index: {e}")
             import traceback
             traceback.print_exc()
-
+    
     def plot_probs_distribution(
         self,
         scores: Optional[List[float]] = None,

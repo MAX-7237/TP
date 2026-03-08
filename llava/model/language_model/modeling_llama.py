@@ -1004,7 +1004,7 @@ class LlamaModel(LlamaPreTrainedModel):
                 dropout = DROPOUT,
                 top_k = TOP_K,
                 tau = TAU,
-                use_layernorm = USE_LAYERNORM,)
+                use_layernorm = USE_LAYERNORM,).to(dtype=torch.float16)
         #-------------------------------------------------------------
 
     def get_input_embeddings(self):
@@ -1111,6 +1111,8 @@ class LlamaModel(LlamaPreTrainedModel):
         for layer_idx, decoder_layer in enumerate(self.layers):
             
             # -------------------------------------------------------------------------------------------------------------------------
+            #剪枝：处理了hidden_states和attention_mask
+            #剪枝：没有处理past_key_values和position_ids
             if is_prefill and layer_idx == PRUNE_LAYER_INDEX:
                 # Check if attention_actor exists
                 if self.actor is not None:
@@ -1138,12 +1140,16 @@ class LlamaModel(LlamaPreTrainedModel):
                     sys_prompt = hidden_states[:, :SYS_PROMPT_LEN, :]
                     image   = hidden_states[:, SYS_PROMPT_LEN:SYS_PROMPT_LEN+IMG_TOKEN_LEN, :] * keep_mask_hs
                     text = hidden_states[:, SYS_PROMPT_LEN+IMG_TOKEN_LEN:, :]
-                    hidden_states = torch.cat([sys_prompt, image, text], dim=1)
+                    hidden_states = torch.cat([sys_prompt, image, text], dim=1).to(hidden_states.dtype)
                     
                     print(f"[DEBUG] Pruned image tokens: {IMG_TOKEN_LEN - num_kept}/{IMG_TOKEN_LEN}, Prune ratio: {prune_ratio}")
                     if self._use_flash_attention_2 and attention_mask is not None:
                         # 2d mask is passed through the layers
-                        attention_mask[:,SYS_PROMPT_LEN:SYS_PROMPT_LEN+IMG_TOKEN_LEN] = attention_mask[:,SYS_PROMPT_LEN:SYS_PROMPT_LEN+IMG_TOKEN_LEN] * keep_mask
+                        # keep_mask: [B, num_img]  (1=keep, 0=prune)
+                        # 0 in keep_mask should become -inf to mask out
+                        neg_inf = torch.finfo(attention_mask.dtype).min
+                        neg_mask = (1 - keep_mask) * neg_inf
+                        attention_mask[:,SYS_PROMPT_LEN:SYS_PROMPT_LEN+IMG_TOKEN_LEN] = attention_mask[:,SYS_PROMPT_LEN:SYS_PROMPT_LEN+IMG_TOKEN_LEN] + neg_mask
                     else:
                         # keep_mask: [B, num_img]  (1=keep, 0=prune)
                         if attention_mask is None:
@@ -1161,7 +1167,7 @@ class LlamaModel(LlamaPreTrainedModel):
                             # pruned broadcast 到 [B,1,1,num_img]，对所有 query 生效
                             pruned_k = pruned[:, None, None, :]  # [B,1,1,num_img]
                             cols = cols.masked_fill(pruned_k, neg_inf)
-                            attention_mask[:, :, :, SYS_PROMPT_LEN:SYS_PROMPT_LEN+IMG_TOKEN_LEN] = cols
+                            attention_mask[:, :, :, SYS_PROMPT_LEN:SYS_PROMPT_LEN+IMG_TOKEN_LEN] = cols.to(hidden_states.dtype)
 
                             # ---- 2) 恢复对角线：让 pruned token 仍能 attend 自己
                             # 找到所有被 prune 的 (b, j)
@@ -1334,8 +1340,20 @@ class LlamaForCausalLM(LlamaPreTrainedModel):
         if not return_dict:
             output = (logits,) + outputs[1:]
             return (loss,) + output if loss is not None else output
-        
+
         #------------------------------------------------------------------------------
+        # Only calculate prune loss if training (lm_loss is not None)
+        if loss is None:
+            # Inference mode: return without prune loss
+            return CausalLMOutputWithPast(
+                loss=loss,
+                logits=logits,
+                past_key_values=outputs.past_key_values,
+                hidden_states=outputs.hidden_states,
+                attentions=outputs.attentions,
+            )
+        
+        # Training mode: calculate prune loss
         lm_loss=loss
         prune_ratio = self.model.prune_ratio
         target_prune_ratio = TARGET_PRUNE_RATIO

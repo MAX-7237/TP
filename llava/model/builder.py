@@ -24,7 +24,7 @@ from llava.constants import DEFAULT_IMAGE_PATCH_TOKEN, DEFAULT_IM_START_TOKEN, D
 
 
 def load_pretrained_model(model_path, model_base, model_name, load_8bit=False, load_4bit=False, device_map=None, device="cuda", use_flash_attn=False, 
-                         use_attention_actor=False, actor_hidden_dim=1024, actor_num_heads=8, actor_num_layers=1, actor_dropout=0.1,
+                         use_actor=False, actor_hidden_dim=1024, actor_num_heads=8, actor_num_layers=1, actor_dropout=0.1,
                          actor_tau=1.0, actor_ckpt=None, actor_top_k=192, **kwargs):
     # Use device_map="cpu" to avoid meta tensor issues, then move to target device
     # This is more reliable than device_map="auto" for CLIPVisionModel
@@ -56,7 +56,7 @@ def load_pretrained_model(model_path, model_base, model_name, load_8bit=False, l
         from llava.model.language_model.llava_llama import LlavaConfig
         cfg_pretrained = LlavaConfig.from_pretrained(model_path)
         # Add Attention Actor attributes to config
-        cfg_pretrained.use_attention_actor = use_attention_actor
+        cfg_pretrained.use_actor = use_actor
         cfg_pretrained.actor_hidden_dim = actor_hidden_dim
         cfg_pretrained.actor_num_heads = actor_num_heads
         cfg_pretrained.actor_num_layers = actor_num_layers
@@ -108,7 +108,7 @@ def load_pretrained_model(model_path, model_base, model_name, load_8bit=False, l
                     shutil.copyfile(os.path.join(model_base, 'configuration_mpt.py'), os.path.join(model_path, 'configuration_mpt.py'))
                 tokenizer = AutoTokenizer.from_pretrained(model_base, use_fast=True)
                 cfg_pretrained = AutoConfig.from_pretrained(model_path, trust_remote_code=True)
-                cfg_pretrained.use_attention_actor = use_attention_actor
+                cfg_pretrained.use_actor = use_actor
                 cfg_pretrained.actor_hidden_dim = actor_hidden_dim
                 cfg_pretrained.actor_num_heads = actor_num_heads
                 cfg_pretrained.actor_num_layers = actor_num_layers
@@ -118,7 +118,7 @@ def load_pretrained_model(model_path, model_base, model_name, load_8bit=False, l
                 model = LlavaMptForCausalLM.from_pretrained(model_base, low_cpu_mem_usage=True, config=cfg_pretrained, **kwargs)
             else:
                 tokenizer = AutoTokenizer.from_pretrained(model_base, use_fast=False)
-                cfg_pretrained.use_attention_actor = use_attention_actor
+                cfg_pretrained.use_actor = use_actor
                 cfg_pretrained.actor_hidden_dim = actor_hidden_dim
                 cfg_pretrained.actor_num_heads = actor_num_heads
                 cfg_pretrained.actor_num_layers = actor_num_layers
@@ -134,7 +134,7 @@ def load_pretrained_model(model_path, model_base, model_name, load_8bit=False, l
             if 'mpt' in model_name.lower():
                 tokenizer = AutoTokenizer.from_pretrained(model_path, use_fast=True)
                 cfg_pretrained = AutoConfig.from_pretrained(model_path, trust_remote_code=True)
-                cfg_pretrained.use_attention_actor = use_attention_actor
+                cfg_pretrained.use_actor = use_actor
                 cfg_pretrained.actor_hidden_dim = actor_hidden_dim
                 cfg_pretrained.actor_num_heads = actor_num_heads
                 cfg_pretrained.actor_num_layers = actor_num_layers
@@ -145,7 +145,7 @@ def load_pretrained_model(model_path, model_base, model_name, load_8bit=False, l
             elif 'mistral' in model_name.lower():
                 tokenizer = AutoTokenizer.from_pretrained(model_path)
                 cfg_pretrained = AutoConfig.from_pretrained(model_path)
-                cfg_pretrained.use_attention_actor = use_attention_actor
+                cfg_pretrained.use_actor = use_actor
                 cfg_pretrained.actor_hidden_dim = actor_hidden_dim
                 cfg_pretrained.actor_num_heads = actor_num_heads
                 cfg_pretrained.actor_num_layers = actor_num_layers
@@ -160,7 +160,7 @@ def load_pretrained_model(model_path, model_base, model_name, load_8bit=False, l
                 )
             else:
                 tokenizer = AutoTokenizer.from_pretrained(model_path, use_fast=False)
-                cfg_pretrained.use_attention_actor = use_attention_actor
+                cfg_pretrained.use_actor = use_actor
                 cfg_pretrained.actor_hidden_dim = actor_hidden_dim
                 cfg_pretrained.actor_num_heads = actor_num_heads
                 cfg_pretrained.actor_num_layers = actor_num_layers
@@ -222,13 +222,13 @@ def load_pretrained_model(model_path, model_base, model_name, load_8bit=False, l
 
     # ---------------------Load Attention Actor checkpoint---------------------
     if actor_ckpt is not None and os.path.exists(actor_ckpt):
-        if hasattr(model, 'get_model') and hasattr(model.get_model(), 'attention_actor'):
+        if hasattr(model, 'get_model') and hasattr(model.get_model(), 'actor'):
             print(f"Loading Attention Actor checkpoint from {actor_ckpt}")
             ckpt = torch.load(actor_ckpt, map_location='cpu')
             if 'state_dict' in ckpt:
-                model.get_model().attention_actor.load_state_dict(ckpt['state_dict'])
+                model.get_model().actor.load_state_dict(ckpt['state_dict'])
             else:
-                model.get_model().attention_actor.load_state_dict(ckpt)
+                model.get_model().actor.load_state_dict(ckpt)
             print("Attention Actor checkpoint loaded successfully!")
     # ---------------------End of Loading Attention Actor checkpoint-----------------
 
